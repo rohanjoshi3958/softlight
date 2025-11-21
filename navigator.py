@@ -154,7 +154,7 @@ Description: {description}
 Return only a CSS selector or XPath, nothing else."""
             
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": "You are a web automation expert. Return only CSS selectors or XPath expressions."},
                     {"role": "user", "content": prompt}

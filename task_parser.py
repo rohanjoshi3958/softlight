@@ -56,7 +56,7 @@ Be specific about button labels, menu items, or form fields to look for.
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4.1",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that parses user questions into structured workflows. Always return valid JSON."},
                     {"role": "user", "content": prompt}
