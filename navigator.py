@@ -64,11 +64,12 @@ class Navigator:
                 pass
             
             try:
-                # Try case-insensitive partial match
-                selector = f"text=/{keyword}/i"
-                element = await self.page.wait_for_selector(selector, timeout=timeout, state="visible")
+                # Try case-insensitive partial match using get_by_text
+                element = await self.page.get_by_text(keyword, exact=False).first.wait_for(
+                    state="visible", timeout=timeout
+                )
                 if element:
-                    return {"element": element, "selector": selector, "method": "text_content"}
+                    return {"element": element, "selector": f"text={keyword}", "method": "text_content"}
             except:
                 pass
         

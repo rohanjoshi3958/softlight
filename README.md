@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 3. Install Playwright browsers:
 ```bash
-playwright install chromium
+playwright install firefox
 ```
 
 4. Set up environment variables:
@@ -115,5 +115,15 @@ Many web applications require authentication. When running Agent B:
 ## Quick Start
 
 See [QUICKSTART.md](QUICKSTART.md) for a step-by-step guide to get started.
+
+## Troubleshooting
+
+If you encounter errors, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
+
+**Most common issue**: Missing dependencies. Run:
+```bash
+pip install -r requirements.txt
+playwright install firefox
+```
 
 

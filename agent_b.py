@@ -38,10 +38,65 @@ class AgentB:
             self.playwright = await async_playwright().start()
         
         if not self.browser:
-            self.browser = await self.playwright.chromium.launch(
-                headless=self.headless,
-                slow_mo=self.slow_mo
-            )
+            # Try multiple launch strategies for macOS compatibility
+            # Note: Firefox uses different args than Chromium
+            launch_strategies = [
+                # Strategy 1: Minimal args (most compatible)
+                {
+                    "headless": self.headless,
+                    "slow_mo": self.slow_mo,
+                },
+                # Strategy 2: Force headless if non-headless failed
+                {
+                    "headless": True,
+                    "slow_mo": self.slow_mo,
+                } if not self.headless else None,
+            ]
+            
+            last_error = None
+            for i, launch_args in enumerate(launch_strategies):
+                if launch_args is None:
+                    continue
+                    
+                try:
+                    print(f"Attempting Firefox launch (strategy {i+1})...")
+                    self.browser = await self.playwright.firefox.launch(**launch_args)
+                    
+                    # Wait a moment to ensure browser stays alive
+                    await asyncio.sleep(0.5)
+                    
+                    # Verify browser is actually running by checking if we can create a context
+                    test_context = await self.browser.new_context()
+                    await test_context.close()
+                    
+                    print("Browser launched successfully!")
+                    break
+                except Exception as e:
+                    last_error = e
+                    if self.browser:
+                        try:
+                            await self.browser.close()
+                        except:
+                            pass
+                        self.browser = None
+                    continue
+            
+            if not self.browser:
+                error_msg = str(last_error) if last_error else "Unknown error"
+                print(f"\n❌ Error launching browser: {error_msg}")
+                print("\n🔧 Troubleshooting steps:")
+                print("1. Install Firefox browser:")
+                print("   playwright install firefox")
+                print("2. Reinstall if needed:")
+                print("   playwright install firefox --force")
+                print("3. Check macOS permissions:")
+                print("   System Settings > Privacy & Security > Accessibility")
+                print("   Allow Terminal/iTerm to control your computer")
+                print("4. Try running in headless mode:")
+                print("   python main.py 'your question' --headless")
+                print("5. Update Playwright:")
+                print("   pip install --upgrade playwright")
+                raise RuntimeError(f"Browser launch failed after all strategies: {error_msg}") from last_error
         
         if not self.context:
             self.context = await self.browser.new_context(
