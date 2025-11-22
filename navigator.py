@@ -2,6 +2,7 @@
 Navigator: Handles finding and interacting with UI elements dynamically.
 """
 import asyncio
+import time
 from typing import Optional, List, Dict
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 from openai import OpenAI
@@ -29,31 +30,38 @@ class Navigator:
         Returns:
             Dictionary with element info or None if not found
         """
+        print(f"  🔍 Searching for element: '{description[:60]}...'")
+        
         # Try multiple strategies to find the element
         strategies = [
-            self._find_by_text_content,
-            self._find_by_aria_label,
-            self._find_by_role,
-            self._find_by_placeholder,
-            self._find_by_semantic_meaning,
+            ("text content", self._find_by_text_content),
+            ("aria label", self._find_by_aria_label),
+            ("role", self._find_by_role),
+            ("placeholder", self._find_by_placeholder),
+            ("semantic", self._find_by_semantic_meaning),
         ]
         
-        for strategy in strategies:
+        for strategy_name, strategy_func in strategies:
             try:
-                element = await strategy(description, timeout)
+                print(f"    Trying strategy: {strategy_name}...")
+                element = await strategy_func(description, timeout)
                 if element:
+                    print(f"    ✓ Found element using: {strategy_name}")
                     return element
             except Exception as e:
+                print(f"    ✗ Strategy {strategy_name} failed: {str(e)[:50]}")
                 continue
         
+        print(f"  ✗ Could not find element after trying all strategies")
         return None
     
     async def _find_by_text_content(self, description: str, timeout: int) -> Optional[Dict]:
         """Find element by matching text content."""
         # Extract key words from description
         keywords = self._extract_keywords(description)
-        
+        print(f"keywords: {keywords}")
         for keyword in keywords:
+            print(f"trying keyword: {keyword}")
             try:
                 # Try exact text match
                 selector = f"text='{keyword}'"
@@ -296,4 +304,159 @@ Return only a CSS selector or XPath, nothing else."""
             return True
         except:
             return False
+    
+    async def is_login_page(self) -> bool:
+        """
+        Detect if the current page is a login/authentication page.
+        
+        Returns:
+            True if login page detected, False otherwise
+        """
+        try:
+            # Check URL for common login patterns
+            url = self.page.url.lower()
+            login_url_patterns = [
+                "/login", "/signin", "/auth", "/authenticate",
+                "/sign-in", "/log-in", "/account/login"
+            ]
+            if any(pattern in url for pattern in login_url_patterns):
+                return True
+            
+            # Check for common login form elements
+            login_selectors = [
+                "input[type='email']",
+                "input[type='password']",
+                "input[name*='email']",
+                "input[name*='username']",
+                "input[name*='password']",
+                "button:has-text('Log in')",
+                "button:has-text('Sign in')",
+                "button:has-text('Sign In')",
+                "[data-testid*='login']",
+                "[class*='login']",
+                "[id*='login']",
+            ]
+            
+            # Check if we have email/password inputs together (strong indicator of login)
+            email_input = await self.page.query_selector("input[type='email'], input[name*='email'], input[name*='username']")
+            password_input = await self.page.query_selector("input[type='password'], input[name*='password']")
+            
+            if email_input and password_input:
+                return True
+            
+            # Check for login button text
+            page_text = await self.page.inner_text("body")
+            login_text_indicators = ["log in", "sign in", "login", "signin", "welcome back"]
+            if any(indicator in page_text.lower() for indicator in login_text_indicators):
+                # But make sure it's not just a link, check for form
+                form_exists = await self.page.query_selector("form")
+                if form_exists:
+                    return True
+            
+            return False
+        except Exception as e:
+            # If we can't determine, assume it's not a login page
+            return False
+    
+    async def wait_for_login(self, timeout: int = 300000) -> bool:
+        """
+        Wait for user to complete login manually.
+        
+        Args:
+            timeout: Maximum time to wait in milliseconds (default 5 minutes)
+            
+        Returns:
+            True if login completed, False if timeout
+        """
+        print("\n" + "="*60)
+        print("🔐 LOGIN DETECTED")
+        print("="*60)
+        print("Please log in to the application in the browser window.")
+        print("The system will automatically detect when login is complete.")
+        print("="*60 + "\n")
+        
+        start_url = self.page.url
+        start_time = time.time()
+        
+        # Wait for login to complete
+        check_interval = 2  # Check every 2 seconds
+        last_progress_message = 0
+        
+        while True:
+            try:
+                current_time = time.time()
+                elapsed = (current_time - start_time) * 1000  # Convert to milliseconds
+                
+                if elapsed >= timeout:
+                    break
+                
+                current_url = self.page.url
+                
+                # Check if URL changed (common sign of successful login)
+                if current_url != start_url and not await self.is_login_page():
+                    print("✓ Login detected! URL changed and login page no longer present.")
+                    await asyncio.sleep(2)  # Wait for page to settle
+                    return True
+                
+                # Check if login page is gone
+                if not await self.is_login_page():
+                    # Wait a bit to make sure it's not just loading
+                    await asyncio.sleep(2)
+                    if not await self.is_login_page():
+                        print("✓ Login detected! Login page no longer present.")
+                        return True
+                
+                # Check for authenticated user indicators
+                authenticated_indicators = [
+                    "button:has-text('Profile')",
+                    "button:has-text('Settings')",
+                    "[data-testid*='user']",
+                    "[class*='user-menu']",
+                    "[class*='avatar']",
+                    "img[alt*='avatar']",
+                ]
+                
+                for indicator in authenticated_indicators:
+                    try:
+                        element = await self.page.query_selector(indicator)
+                        if element:
+                            # Double check login page is gone
+                            await asyncio.sleep(1)
+                            if not await self.is_login_page():
+                                print(f"✓ Login detected! Found authenticated user indicator.")
+                                return True
+                    except:
+                        continue
+                
+                # Show progress every 30 seconds
+                elapsed_seconds = int(elapsed / 1000)
+                if elapsed_seconds - last_progress_message >= 30 and elapsed_seconds > 0:
+                    remaining_minutes = int((timeout - elapsed) / 60000)
+                    print(f"⏳ Still waiting for login... ({remaining_minutes} minutes remaining)")
+                    last_progress_message = elapsed_seconds
+                
+                # Wait before next check
+                await asyncio.sleep(check_interval)
+                
+            except Exception as e:
+                # Continue waiting even if there's an error
+                await asyncio.sleep(check_interval)
+                continue
+        
+        print("❌ Login timeout - proceeding anyway (user may have logged in)")
+        return False
+    
+    async def ensure_authenticated(self, timeout: int = 300000) -> bool:
+        """
+        Ensure user is authenticated. If login page is detected, wait for login.
+        
+        Args:
+            timeout: Maximum time to wait for login in milliseconds
+            
+        Returns:
+            True if authenticated, False otherwise
+        """
+        if await self.is_login_page():
+            return await self.wait_for_login(timeout)
+        return True
 

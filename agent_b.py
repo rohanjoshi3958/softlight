@@ -159,6 +159,36 @@ class AgentB:
             if screenshot_path:
                 results["screenshots"].append(screenshot_path)
             
+            # Step 1.5: Check for login and wait if needed
+            # Only auto-detect login if there's no explicit login step in the workflow
+            has_login_step = any(
+                any(word in step.lower() for word in ["log in", "login", "sign in", "signin", "authenticate"])
+                for step in workflow['steps']
+            )
+            
+            if not has_login_step:
+                # No explicit login step, so check if we need to log in automatically
+                print("\nChecking authentication status...")
+                if await self.navigator.is_login_page():
+                    print("Login page detected (no login step in workflow).")
+                    login_completed = await self.navigator.wait_for_login(timeout=300000)  # 5 minutes
+                    
+                    if login_completed:
+                        print("\n✓ Authentication successful! Proceeding with task...\n")
+                        # Capture screenshot after login
+                        await asyncio.sleep(2)  # Wait for page to settle
+                        screenshot_path = await self.screenshot_manager.capture_current_page(
+                            self.page, "after_login"
+                        )
+                        if screenshot_path:
+                            results["screenshots"].append(screenshot_path)
+                    else:
+                        print("\n⚠ Proceeding anyway - please ensure you're logged in.\n")
+                else:
+                    print("✓ Already authenticated or no login required.\n")
+            else:
+                print("✓ Login step found in workflow - will handle during step execution.\n")
+            
             # Execute each step in the workflow
             for i, step in enumerate(workflow['steps'], start=2):
                 print(f"\nStep {i}: {step}")
@@ -167,8 +197,93 @@ class AgentB:
                     # Determine action type from step description
                     step_lower = step.lower()
                     
-                    if any(word in step_lower for word in ["click", "press", "select", "choose", "open"]):
+                    # Special handling for login steps
+                    if any(word in step_lower for word in ["log in", "login", "sign in", "signin", "authenticate"]):
+                        print("  🔐 Login step detected - waiting for manual login...")
+                        
+                        # Check if we're already on a login page
+                        is_on_login_page = await self.navigator.is_login_page()
+                        
+                        if not is_on_login_page:
+                            # Not on login page yet - try to navigate to it
+                            print("  Navigating to login page...")
+                            
+                            # Capture screenshot before navigating to login
+                            screenshot_path = await self.screenshot_manager.capture_current_page(
+                                self.page, f"before_login_step_{i}"
+                            )
+                            if screenshot_path:
+                                results["screenshots"].append(screenshot_path)
+                            
+                            # Try to find and click a login button/link (but don't be verbose about it)
+                            # Only try common login button texts, not the whole step description
+                            login_button_texts = ["log in", "login", "sign in", "signin", "sign in"]
+                            login_found = False
+                            
+                            for button_text in login_button_texts:
+                                try:
+                                    # Use a quiet method to find login button
+                                    element = await self.page.get_by_text(button_text, exact=False).first.wait_for(
+                                        state="visible", timeout=3000
+                                    )
+                                    if element:
+                                        await element.click()
+                                        login_found = True
+                                        print(f"  ✓ Clicked '{button_text}' button")
+                                        break
+                                except:
+                                    continue
+                            
+                            if login_found:
+                                await asyncio.sleep(2)  # Wait for login page to load
+                                # Verify we're now on login page
+                                is_on_login_page = await self.navigator.is_login_page()
+                            
+                            if is_on_login_page:
+                                # Capture login page
+                                screenshot_path = await self.screenshot_manager.capture_current_page(
+                                    self.page, f"login_page_step_{i}"
+                                )
+                                if screenshot_path:
+                                    results["screenshots"].append(screenshot_path)
+                            else:
+                                print("  ⚠ Could not find login button - please navigate to login page manually")
+                        else:
+                            print("  ✓ Login page already visible.")
+                            # Capture login page
+                            screenshot_path = await self.screenshot_manager.capture_current_page(
+                                self.page, f"login_page_step_{i}"
+                            )
+                            if screenshot_path:
+                                results["screenshots"].append(screenshot_path)
+                        
+                        # Wait for user to complete login (this is the main action for login steps)
+                        print("  Waiting for you to complete login...")
+                        login_completed = await self.navigator.wait_for_login(timeout=300000)  # 5 minutes
+                        
+                        if login_completed:
+                            print("  ✓ Login completed successfully!")
+                            # Wait 5 seconds for page to fully load and settle
+                            print("  ⏳ Waiting 5 seconds for page to settle...")
+                            await asyncio.sleep(5)
+                            
+                            # Capture screenshot after login
+                            screenshot_path = await self.screenshot_manager.capture_current_page(
+                                self.page, f"after_login_step_{i}"
+                            )
+                            if screenshot_path:
+                                results["screenshots"].append(screenshot_path)
+                            print("  ✓ Screenshot captured, proceeding to next step...")
+                        else:
+                            print("  ⚠ Login timeout - proceeding anyway")
+                            results["errors"].append(f"Login step may not have completed: {step}")
+                        
+                        # Continue to next step (loop will automatically continue)
+                        continue
+                    
+                    elif any(word in step_lower for word in ["click", "press", "select", "choose", "open"]):
                         # This is a click action
+                        print(f"  🖱️  Detected click action - finding element...")
                         success = await self.navigator.click_element(step, wait_for_state_change=True)
                         
                         if success:
